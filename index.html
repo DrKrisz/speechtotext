@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Simple Speech → Text (English)</title>
+  <title>Simple Speech → Text (EN/HU)</title>
   <style>
     :root {
       --bg: #0f1115;
@@ -52,17 +52,30 @@
     .pill { padding: 6px 10px; border-radius: 999px; background: #1a2031; border: 1px solid rgba(255,255,255,0.07); }
     .interim { opacity: 0.7; font-style: italic; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      /* extras */
+    .clear { background: #1f2937; }
+    .lang { background: #1e2436; }
+    .lang.active { outline: 2px solid rgba(79,70,229,0.55); }
+      /* extras */
+    .clear { background: #1f2937; }
+    .lang { background: #1e2436; }
+    .lang.active { outline: 2px solid rgba(79,70,229,0.55); }
+    .select { 
+      appearance: none; background:#0b0e15; color: var(--text); border:1px solid rgba(255,255,255,0.08);
+      padding: 8px 10px; border-radius: 10px; font-weight: 600; cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <div class="app" role="application" aria-label="Simple speech to text app">
-    <h1>Speech → Text (English)</h1>
+    <h1>Speech → Text</h1>
     <p>Click <strong>Record</strong> and speak. Live transcript appears below. Click <strong>Stop</strong> then <strong>Download</strong> to save a <span class="mono">.txt</span> file. Runs in your browser only – no server.</p>
 
     <div class="controls" aria-live="polite">
       <button class="start" id="btnStart">Record</button>
       <button class="stop" id="btnStop" disabled>Stop</button>
       <button class="download" id="btnDownload" disabled>Download .txt</button>
+      <button class="clear" id="btnClear" title="Clear transcript">Clear</button>
       <span class="status pill" id="status">Idle</span>
     </div>
 
@@ -73,12 +86,20 @@
     </div>
 
     <div class="row small">
-      <span>Language: <span class="pill">English (en‑GB)</span></span>
-      <span class="pill" id="timer">00:00:00</span>
+      <label for="langSelect">Language:</label>
+      <select id="langSelect" class="select" aria-label="Recognition language">
+        <option value="en-GB" selected>English (UK)</option>
+        <option value="en-US">English (US)</option>
+        <option value="no-NO">Norwegian Bokmål (no‑NO)</option>
+        <option value="hu-HU">Hungarian (hu‑HU)</option>
+      </select>
+      <span class="pill" title="Recording time" id="timer">00:00:00</span>
       <span class="pill" id="wordCount">0 words</span>
+      <span class="pill mono" id="sizeInfo">0 B</span>
+      <span class="pill" id="limitInfo" title="Recognition auto‑extends indefinitely">∞ auto‑extend</span>
     </div>
 
-    <p class="small">Tip: Works best in Chrome or Edge over HTTPS or on <span class="mono">localhost</span>. For long sessions we auto‑restart listening to cover up to ~60 minutes. Accuracy is provided by the browser’s built‑in speech recognition.</p>
+    <p class="small">Tip: Works best in Chrome or Edge over HTTPS or on <span class="mono">localhost</span>. Long sessions auto‑extend indefinitely (we restart recognition as needed). Accuracy comes from your browser’s built‑in engine.</p>
   </div>
 
   <script>
@@ -99,12 +120,17 @@
     const interimEl = document.getElementById('interim');
     const timerEl = document.getElementById('timer');
     const wordCountEl = document.getElementById('wordCount');
+    const btnClear = document.getElementById('btnClear');
+    const langSelect = document.getElementById('langSelect');
+    const sizeInfoEl = document.getElementById('sizeInfo');
+
 
     let recognition = null;
     let recording = false;
     let finalTranscript = '';
     let startedAt = null;
     let timerInterval = null;
+    let currentLang = 'en-GB';
 
     function updateStatus(msg) { statusEl.textContent = msg; }
 
@@ -112,6 +138,15 @@
       const text = (finalTranscript + ' ' + transcriptEl.value).trim();
       const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
       wordCountEl.textContent = words + (words === 1 ? ' word' : ' words');
+    }
+
+    function clearTranscript() {
+      finalTranscript = '';
+      transcriptEl.value = '';
+      interimEl.textContent = '';
+      updateWordCount();
+            updateSizeInfo();
+      updateSizeInfo();
     }
 
     function startTimer() {
@@ -132,7 +167,7 @@
     function initRecognition() {
       if (!hasAPI) return null;
       const rec = new SpeechRecognition();
-      rec.lang = 'en-GB'; // single language: English
+      rec.lang = currentLang; // selected language
       rec.interimResults = true;
       rec.continuous = true; // request continuous results
       rec.maxAlternatives = 1;
@@ -152,6 +187,7 @@
             finalTranscript += (finalTranscript && !/\n$/.test(finalTranscript) ? ' ' : '') + text.trim();
             transcriptEl.value = finalTranscript;
             updateWordCount();
+            updateSizeInfo();
           } else {
             interim += text;
           }
@@ -212,6 +248,7 @@
         transcriptEl.value = finalTranscript;
         interimEl.textContent = '';
         updateWordCount();
+            updateSizeInfo();
       }
     });
 
@@ -229,7 +266,42 @@
       setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
     });
 
-    transcriptEl.addEventListener('input', updateWordCount);
+    // language helpers & size meter
+    function applyLang(lang) {
+      if (!ensureAPI()) return;
+      currentLang = lang;
+      if (!recognition) recognition = initRecognition();
+      if (recognition) recognition.lang = currentLang;
+      if (recording) {
+        try { recognition.stop(); } catch(_){}
+        // onend will auto‑restart with new language
+      }
+    }
+
+    // size calculator (UTF‑8)
+    const _encoder = new TextEncoder();
+    function _formatBytes(b){
+      if (b < 1024) return b + ' B';
+      const kb = b / 1024; if (kb < 1024) return kb.toFixed(1) + ' KB';
+      const mb = kb / 1024; if (mb < 1024) return mb.toFixed(2) + ' MB';
+      const gb = mb / 1024; return gb.toFixed(3) + ' GB';
+    }
+    function updateSizeInfo(){
+      const bytes = _encoder.encode(transcriptEl.value).length;
+      if (sizeInfoEl) {
+        sizeInfoEl.textContent = _formatBytes(bytes);
+        sizeInfoEl.title = `${bytes} B | ${(bytes/1024).toFixed(2)} KB | ${(bytes/1024/1024).toFixed(2)} MB | ${(bytes/1024/1024/1024).toFixed(3)} GB`;
+      }
+    }
+
+    // wire controls
+    if (langSelect) langSelect.addEventListener('change', (e) => applyLang(e.target.value));
+    if (btnClear) btnClear.addEventListener('click', clearTranscript);
+
+    // set defaults on load
+    updateSizeInfo();
+
+    transcriptEl.addEventListener('input', () => { updateWordCount(); updateSizeInfo(); });
 
     // graceful degradation: disable controls if API missing
     if (!hasAPI) {
