@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simple Speech → Text (English)</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #151823;
+      --text: #e7ecf3;
+      --muted: #94a3b8;
+      --accent: #4f46e5;
+      --accent-2: #22c55e;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 800px at 20% -10%, #1a1f2d 0%, transparent 60%), var(--bg);
+      color: var(--text);
+      display: grid; place-items: center; padding: 24px;
+    }
+    .app {
+      width: min(960px, 100%);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      padding: 18px 18px 14px;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: 0.2px; }
+    p { margin: 6px 0 14px; color: var(--muted); font-size: 14px; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button {
+      border: 0; padding: 10px 14px; border-radius: 12px; font-weight: 600; cursor: pointer;
+      background: #22283a; color: var(--text); transition: transform 0.02s ease;
+    }
+    button:active { transform: translateY(1px); }
+    .start { background: var(--accent); }
+    .stop { background: var(--danger); }
+    .download { background: var(--accent-2); }
+    .status { margin-left: auto; font-size: 13px; color: var(--muted); }
+    .row { margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .text {
+      width: 100%; min-height: 300px; max-height: 60vh; padding: 14px; line-height: 1.6;
+      border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);
+      background: #0b0e15; color: var(--text); font-size: 16px; resize: vertical;
+    }
+    .small { font-size: 12px; color: var(--muted); }
+    .pill { padding: 6px 10px; border-radius: 999px; background: #1a2031; border: 1px solid rgba(255,255,255,0.07); }
+    .interim { opacity: 0.7; font-style: italic; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="Simple speech to text app">
+    <h1>Speech → Text (English)</h1>
+    <p>Click <strong>Record</strong> and speak. Live transcript appears below. Click <strong>Stop</strong> then <strong>Download</strong> to save a <span class="mono">.txt</span> file. Runs in your browser only – no server.</p>
+
+    <div class="controls" aria-live="polite">
+      <button class="start" id="btnStart">Record</button>
+      <button class="stop" id="btnStop" disabled>Stop</button>
+      <button class="download" id="btnDownload" disabled>Download .txt</button>
+      <span class="status pill" id="status">Idle</span>
+    </div>
+
+    <div class="row">
+      <label for="transcript" class="small">Transcript</label>
+      <textarea id="transcript" class="text" placeholder="Your words will appear here…" spellcheck="false"></textarea>
+      <div class="small interim" id="interim"></div>
+    </div>
+
+    <div class="row small">
+      <span>Language: <span class="pill">English (en‑GB)</span></span>
+      <span class="pill" id="timer">00:00:00</span>
+      <span class="pill" id="wordCount">0 words</span>
+    </div>
+
+    <p class="small">Tip: Works best in Chrome or Edge over HTTPS or on <span class="mono">localhost</span>. For long sessions we auto‑restart listening to cover up to ~60 minutes. Accuracy is provided by the browser’s built‑in speech recognition.</p>
+  </div>
+
+  <script>
+    // Simple English speech‑to‑text using the Web Speech API (browser powered).
+    // Notes:
+    //  - Best in Chromium browsers.
+    //  - Must be served via HTTPS (or localhost).
+    //  - We auto‑restart recognition on 'end' while recording to sustain long sessions.
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const hasAPI = !!SpeechRecognition;
+
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const btnDownload = document.getElementById('btnDownload');
+    const statusEl = document.getElementById('status');
+    const transcriptEl = document.getElementById('transcript');
+    const interimEl = document.getElementById('interim');
+    const timerEl = document.getElementById('timer');
+    const wordCountEl = document.getElementById('wordCount');
+
+    let recognition = null;
+    let recording = false;
+    let finalTranscript = '';
+    let startedAt = null;
+    let timerInterval = null;
+
+    function updateStatus(msg) { statusEl.textContent = msg; }
+
+    function updateWordCount() {
+      const text = (finalTranscript + ' ' + transcriptEl.value).trim();
+      const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+      wordCountEl.textContent = words + (words === 1 ? ' word' : ' words');
+    }
+
+    function startTimer() {
+      startedAt = startedAt || Date.now();
+      timerInterval = setInterval(() => {
+        const ms = Date.now() - startedAt;
+        const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
+        const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
+        const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
+        timerEl.textContent = `${h}:${m}:${s}`;
+      }, 500);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval); timerInterval = null;
+    }
+
+    function initRecognition() {
+      if (!hasAPI) return null;
+      const rec = new SpeechRecognition();
+      rec.lang = 'en-GB'; // single language: English
+      rec.interimResults = true;
+      rec.continuous = true; // request continuous results
+      rec.maxAlternatives = 1;
+
+      rec.onstart = () => { updateStatus('Listening…'); };
+      rec.onerror = (e) => {
+        updateStatus('Error: ' + (e.error || 'unknown'));
+        // auto‑retry on network/no‑speech glitches while recording
+        if (recording) setTimeout(() => { try { rec.start(); } catch(_){} }, 600);
+      };
+      rec.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          const text = res[0].transcript;
+          if (res.isFinal) {
+            finalTranscript += (finalTranscript && !/\n$/.test(finalTranscript) ? ' ' : '') + text.trim();
+            transcriptEl.value = finalTranscript;
+            updateWordCount();
+          } else {
+            interim += text;
+          }
+        }
+        interimEl.textContent = interim ? '… ' + interim : '';
+      };
+      rec.onend = () => {
+        updateStatus('Idle');
+        // if user is still recording, immediately restart to extend session
+        if (recording) {
+          try { rec.start(); updateStatus('Listening…'); } catch (_) {
+            // small backoff if restart was too fast
+            setTimeout(() => { try { rec.start(); updateStatus('Listening…'); } catch(_){} }, 400);
+          }
+        }
+      };
+
+      return rec;
+    }
+
+    function ensureAPI() {
+      if (!hasAPI) {
+        alert('Your browser does not support Web Speech Recognition.\nTry Chrome or Edge on desktop with HTTPS.');
+        return false;
+      }
+      return true;
+    }
+
+    btnStart.addEventListener('click', async () => {
+      if (!ensureAPI()) return;
+      if (recording) return;
+      if (!recognition) recognition = initRecognition();
+      // reset interim area
+      interimEl.textContent = '';
+      // start recognition
+      try {
+        recognition.start();
+        recording = true;
+        btnStart.disabled = true; btnStop.disabled = false; btnDownload.disabled = true;
+        updateStatus('Listening…');
+        startTimer();
+      } catch (e) {
+        updateStatus('Could not start: ' + (e.message || e));
+      }
+    });
+
+    btnStop.addEventListener('click', () => {
+      if (!recording) return;
+      recording = false;
+      try { recognition && recognition.stop(); } catch(_){}
+      btnStart.disabled = false; btnStop.disabled = true; btnDownload.disabled = false;
+      updateStatus('Stopped');
+      stopTimer();
+      // fold any last interim into final text (optional)
+      const last = interimEl.textContent.replace(/^…\s*/, '').trim();
+      if (last) {
+        finalTranscript += (finalTranscript ? ' ' : '') + last;
+        transcriptEl.value = finalTranscript;
+        interimEl.textContent = '';
+        updateWordCount();
+      }
+    });
+
+    btnDownload.addEventListener('click', () => {
+      const text = transcriptEl.value.trim();
+      if (!text) return alert('Nothing to download yet.');
+      const blob = new Blob([text + "\n"], { type: 'text/plain;charset=UTF-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url;
+      a.download = `transcript-${stamp}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+    });
+
+    transcriptEl.addEventListener('input', updateWordCount);
+
+    // graceful degradation: disable controls if API missing
+    if (!hasAPI) {
+      btnStart.disabled = true; btnStop.disabled = true; btnDownload.disabled = false;
+      updateStatus('Speech recognition not supported. You can type and download.');
+    }
+  </script>
+</body>
+</html>
