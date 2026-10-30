@@ -1,71 +1,71 @@
 # Simple Speech to Text (EN/HU/NO)
 
-**Live site:** https://drkrisz.github.io/speechtotext/
+A small static web app that turns speech into an editable transcript and exports
+it as a `.txt` file.
 
-A minimal browser app that turns speech into text and lets you download the transcript as a `.txt` file. Everything runs locally in your browser using the Web Speech API.
+[Open the published version](https://drkrisz.github.io/speechtotext/)
 
-## Features
-- Record, Stop, and Download `.txt`
-- Live transcript with interim text
-- Language dropdown: English (UK), English (US), Norwegian Bokmål (no-NO), Hungarian (hu-HU)
-- Clear button to wipe the transcript
-- Live size meter (B, KB, MB, GB)
-- Auto extend for long sessions: recognition restarts to keep recording
+## Stack and features
 
-## How it works
-- Uses the browser built in speech recognition (Web Speech API)
-- No server or cloud calls
-- Best in Chromium browsers (Chrome, Edge)
-- Microphone permission is required
+Plain HTML, CSS and JavaScript in one `index.html`; browser Web Speech API,
+Blob downloads and TextEncoder. There is no application backend or build step.
 
-## Quick start
+- Start/stop recognition, show interim and final text, clear and download.
+- Language choices: English UK/US, Norwegian Bokmål and Hungarian.
+- Recording timer, word counter and UTF-8 size display.
+- Attempts to restart recognition when a session ends while recording.
 
-### Run locally
-Web Speech API needs HTTPS or `localhost`.
+## Run locally
 
-**Python 3**
+With Python 3 installed, run from the repository directory:
+
 ```bash
 python -m http.server 8000
-# open http://localhost:8000
 ```
 
-**Node (npx)**
-```bash
-npx serve .
-# open the printed localhost URL
-```
+Open [localhost:8000](http://localhost:8000) in a browser with speech recognition
+support and allow microphone access. For deployment, serve the static page
+over HTTPS, such as GitHub Pages.
 
-### Deploy to GitHub Pages
-1. Put `index.html` in the repo root.
-2. Push to `main` (or `master`).
-3. In GitHub: Settings -> Pages -> set Source to deploy from the root.
-4. Your site will be available at `https://<username>.github.io/<repo>/`.
+## Architecture and development
 
-Already live here: https://drkrisz.github.io/speechtotext/
+All markup, styles, recognition event handlers and download logic are in
+`index.html`. The app creates `SpeechRecognition` or
+`webkitSpeechRecognition` when available. Recognition results update a text
+buffer and textarea; download creates a local Blob URL.
 
-## Browser support
-- Chrome and Edge: supported
-- Safari and Firefox: limited or no Web Speech API support
-- If the API is not available, you can still type and download the text
+The [public development history](https://github.com/DrKrisz/speechtotext/commits/main/)
+records the page and subsequent interface/recognition changes under DrKrisz.
+The app integrates a browser recognition service; it does not implement or
+train a speech-recognition model.
 
-## Tips
-- Keep the tab focused while recording
-- If recognition stops after a while, press Record again
-- Use a decent microphone and avoid loud background noise
+## Privacy and browser limits
 
-## Known limitations
-- Accuracy and stability come from the browser engine and vary by device
-- Punctuation and capitalization may need manual edits
-- Very long sessions can hiccup; the app restarts recognition to extend time
+The page has no custom backend upload endpoint. **That does not guarantee local
+or offline recognition:** the browser's recognition service may send microphone
+audio to a remote service. This app does not request on-device processing.
+See [MDN's SpeechRecognition notes](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition).
 
-## Roadmap
-- Optional punctuation cleanup
-- Autosave to local storage
-- Timestamped paragraphs and notes
-- More language variants on demand
+Support depends on the browser, platform, microphone permissions and recognition
+service. The code detects API availability; if it is missing, typing and text
+download remain available. There is no verified browser compatibility matrix.
 
-## Development
-All logic is in a single `index.html`. Edit styles or scripts and reload.
+## Checks before a demo
 
-## License
-MIT License. Use, modify, and share at your own risk.
+1. Open over HTTPS or localhost and grant microphone access.
+2. Record a short phrase, stop, edit the text and download it.
+3. Try changing language, clearing text and denying microphone access.
+4. Check fallback typing/download in a browser without the API.
+
+No automated recognition or microphone test is included. Recognition accuracy
+and long-session reliability depend on the browser service.
+
+## Current limitations
+
+- No autosave: refreshing or closing the page loses the transcript.
+- Automatic retries do not guarantee uninterrupted recording.
+- The word counter currently combines the saved buffer with the textarea and can
+  overcount recognized text.
+- Editing during recognition can be overwritten by the next recognition result.
+- No application-level encryption or control over the browser provider's
+  recognition infrastructure.
